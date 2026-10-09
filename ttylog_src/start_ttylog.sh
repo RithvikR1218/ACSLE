@@ -61,6 +61,13 @@ fi
 function clean_up {
         echo
         $sudo bash -c "echo 'END tty_sid:$CNT' >> $LOGPATH"
+        # Stop ttylog and its strace (one process group, from setsid). Under
+        # ForceCommand the connection closes anyway, but after acsle-record it
+        # stays open and would keep tracing the shell you return to.
+        PSTRING_KILL=$(ps -o args -p ${PID_TTYLOG} --no-headers 2>/dev/null)
+        if [[ $PSTRING_KILL =~ ttylog\ ${TTY} ]]; then
+            $sudo kill -- -${PID_TTYLOG} 2>/dev/null
+        fi
         for i in $(seq 1 50); do
             PSTRING_KILL=$(ps -o args -p ${PID_CONTCSV} --no-headers 2>/dev/null)
             [[ $PSTRING_KILL =~ ${CONTCSVPATH} ]] || break
@@ -129,6 +136,7 @@ if [ -z "$SSH_ORIGINAL_COMMAND" ]; then
     start_up
 
     setsid $sudo $ACSLE_LIBDIR/ttylog $TTY >> $LOGPATH 2>> $ERRPATH < /dev/null &
+    PID_TTYLOG=$!
 
 
     # Annotator requires existence of a CSV file produced by analyze_continuous.py

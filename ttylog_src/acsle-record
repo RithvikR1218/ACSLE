@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# Records the current SSH session with ttylog, for machines where sshd's
+# ForceCommand isn't set (install.sh --no-sshd). Opens a recorded shell;
+# recording stops when you exit it.
+
+if [ -r /etc/acsle/acsle.conf ]; then
+    . /etc/acsle/acsle.conf
+fi
+: "${ACSLE_LIBDIR:=/usr/lib/acsle}"
+
+if [ -n "${ACSLE_SESSION:-}" ]; then
+    echo "acsle-record: this session is already being recorded" >&2
+    exit 1
+fi
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    echo "acsle-record: run it as yourself, not with sudo" >&2
+    exit 1
+fi
+if [ -z "${SSH_TTY:-}" ]; then
+    echo "acsle-record: run this from an interactive SSH session (ssh -t)" >&2
+    exit 1
+fi
+
+# script.sh only starts an interactive recording when this is empty
+unset SSH_ORIGINAL_COMMAND
+echo "acsle-record: recording this session; type 'exit' to stop"
+exec sh "$ACSLE_LIBDIR/script.sh"
