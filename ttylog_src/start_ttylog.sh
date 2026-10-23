@@ -35,10 +35,19 @@ exit_flag=1
 
 if command -v sudo > /dev/null 2>&1; then
     sudo="sudo"
-else 
+    qsudo="quiet_sudo"
+else
     sudo=""
+    qsudo=""
     exit_flag=0 # No sudo group means everyones in the sudo group
 fi
+
+# sudo warns "unable to resolve host" on every call when the hostname isn't in
+# /etc/hosts (common on testbed nodes). Drop that line, keep other errors and
+# sudo's exit status. Not for background jobs: $! would be this function's PID.
+function quiet_sudo {
+    { sudo "$@" 2>&1 1>&3 3>&- | grep -v 'unable to resolve host' >&2; return ${PIPESTATUS[0]}; } 3>&1
+}
 
 for group in $user_groups
 do
@@ -60,7 +69,7 @@ fi
 
 function clean_up {
         echo
-        $sudo bash -c "echo 'END tty_sid:$CNT' >> $LOGPATH"
+        $qsudo bash -c "echo 'END tty_sid:$CNT' >> $LOGPATH"
         # Stop ttylog and its strace (one process group, from setsid). Under
         # ForceCommand the connection closes anyway, but after acsle-record it
         # stays open and would keep tracing the shell you return to.
@@ -103,30 +112,30 @@ function start_up {
     HN=$(cat /proc/sys/kernel/hostname)
     USER=$(whoami)
 
-    $sudo mkdir -p $TRACE_DIR/
+    $qsudo mkdir -p $TRACE_DIR/
     #Checking for the existence for a log file constructed using hostname, project name, and experiment name
     #A log file constructed using just the hostname will also work fine.
     COUNTFILE=$TRACE_DIR/count.$USER
-    if $sudo [ -e "$COUNTFILE" ]; then
-        CNT=$($sudo cat $COUNTFILE)
+    if $qsudo [ -e "$COUNTFILE" ]; then
+        CNT=$($qsudo cat $COUNTFILE)
         let CNT++
     else
         CNT=0
     fi
-    while $sudo [ -e "$TRACE_DIR/ttylog.$HN.$USER.$CNT.trace" ]; do
+    while $qsudo [ -e "$TRACE_DIR/ttylog.$HN.$USER.$CNT.trace" ]; do
         let CNT++
     done
-    echo $CNT | $sudo tee $COUNTFILE > /dev/null
+    echo $CNT | $qsudo tee $COUNTFILE > /dev/null
 
     export TTY_SID=$CNT
     export TTY_USER=$USER
     LOGPATH=$TRACE_DIR/ttylog.$HN.$USER.$CNT.trace
 
-    $sudo touch $LOGPATH
-    $sudo chmod ugo+rw $LOGPATH
+    $qsudo touch $LOGPATH
+    $qsudo chmod ugo+rw $LOGPATH
     ERRPATH=$TRACE_DIR/ttylog.$HN.$USER.$CNT.err
-    $sudo touch $ERRPATH
-    $sudo chmod ugo+rw $ERRPATH
+    $qsudo touch $ERRPATH
+    $qsudo chmod ugo+rw $ERRPATH
 
     
     echo "starting session w tty_sid:$CNT" >> $LOGPATH
@@ -147,8 +156,8 @@ if [ -z "$SSH_ORIGINAL_COMMAND" ]; then
     # Create a directory for storing CSV's from analyze_continuous.py
     # This directory is wiped off when the experiment is swapped off
     CONTCSVDIR="$CSV_DIR/"
-    if ! $sudo [ -d $CONTCSVDIR ]; then
-        $sudo mkdir -p $CONTCSVDIR
+    if ! $qsudo [ -d $CONTCSVDIR ]; then
+        $qsudo mkdir -p $CONTCSVDIR
     fi
     CONTCSVPATH=${CONTCSVDIR}analyze.$USER.$CNT.csv
 
@@ -163,23 +172,23 @@ if [ -z "$SSH_ORIGINAL_COMMAND" ]; then
     PID_CONTCSV=$!
 
     # Create an empty CSV file if no such file exists.
-    if ! $sudo [ -f $CONTCSVPATH ]; then
-        $sudo touch ${CONTCSVPATH}
+    if ! $qsudo [ -f $CONTCSVPATH ]; then
+        $qsudo touch ${CONTCSVPATH}
     fi
 
     # Create a directory to for storing output from annotator script
     # This directory is wiped off when the experiment is swapped off
     ANNDIR="$ANNOTATOR_DIR/"
-    if ! $sudo [ -d $ANNDIR ]; then
-        $sudo mkdir -p $ANNDIR
+    if ! $qsudo [ -d $ANNDIR ]; then
+        $qsudo mkdir -p $ANNDIR
     fi
     ANNOTATORPATH=${ANNDIR}annotate.$USER.$CNT
     # This file contains the milestones file
     MILESTONEFILE="$MILESTONE_DIR/milestone_file"
     MILESTONEMESS="$MILESTONE_DIR/milestone_messages"
-    if $sudo [ -f $MILESTONEFILE ]; then
-        if ! $sudo [ -f ${ANNOTATORPATH} ]; then
-            $sudo touch ${ANNOTATORPATH}
+    if $qsudo [ -f $MILESTONEFILE ]; then
+        if ! $qsudo [ -f ${ANNOTATORPATH} ]; then
+            $qsudo touch ${ANNOTATORPATH}
         fi
         $sudo perl $ACSLE_LIBDIR/milestones-lbl.pl ${MILESTONEFILE} ${CONTCSVPATH} ${ANNOTATORPATH} 2>/dev/null &
         PID_ANNOTATOR=$!
