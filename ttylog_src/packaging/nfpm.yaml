@@ -2,7 +2,8 @@
 # Run from ttylog_src/:  make packages VERSION=1.0.0
 name: acsle-ttylog
 version: ${VERSION}
-arch: all
+# The Makefile sets this per format: "all" maps right for deb/rpm/Arch, but apk needs "noarch"
+arch: ${ARCH}
 platform: linux
 section: admin
 maintainer: Rthvik <rithvik.ravilla@gmail.com>
@@ -15,7 +16,8 @@ license: GPL-2.0
 depends: [bash, strace, perl, python3, openssh-server, sudo, procps]
 overrides:
   rpm:
-    depends: [bash, strace, perl, python3, openssh-server, sudo, procps-ng]
+    # Fedora/RHEL call it procps-ng, openSUSE procps (rich dep, rpm >= 4.13)
+    depends: [bash, strace, perl, python3, openssh-server, sudo, (procps-ng or procps)]
   archlinux:
     depends: [bash, strace, perl, python, openssh, sudo, procps-ng]
 

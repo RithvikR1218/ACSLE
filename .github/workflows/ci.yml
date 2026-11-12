@@ -1,0 +1,78 @@
+# Syntax-checks the scripts, builds every package, and installs each one in a
+# container of every supported distro. Also called by release.yml with the
+# release version.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        description: Package version (without the leading v)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  # 2.48+ is needed: older nfpm writes .apk files that apk-tools rejects
+  NFPM_VERSION: 2.48.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, so `git describe` gives the version
+
+      - name: Install nfpm
+        run: |
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          nfpm --version
+
+      - name: Syntax check
+        run: make -C ttylog_src check
+
+      - name: Build packages
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: make -C ttylog_src packages ${VERSION_INPUT:+VERSION=$VERSION_INPUT}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: ttylog_src/dist/
+          if-no-files-found: error
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu:24.04
+          - ubuntu:22.04
+          - debian:12
+          - rockylinux:9
+          - fedora:latest
+          - opensuse/leap:15.6
+          - opensuse/tumbleweed
+          - alpine:latest
+          - archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ttylog_src/dist/
+
+      - name: Install and check in ${{ matrix.image }}
+        working-directory: ttylog_src
+        run: docker run --rm -v "$PWD:/src" -w /src "${{ matrix.image }}" sh packaging/smoke-test.sh

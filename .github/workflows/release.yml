@@ -1,0 +1,142 @@
+# Push a tag like v1.2.0 to build, test and publish a release:
+#   1. packages are built and smoke-tested on every distro (ci.yml)
+#   2. a GitHub Release is created with the packages, a source tarball and SHA256SUMS
+#   3. for stable tags (no "-rc1" style suffix) the signed apt/dnf repo on
+#      GitHub Pages is updated
+# See ttylog_src/packaging/RELEASING.md for the one-time setup.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - id: v
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::tag $GITHUB_REF_NAME is not vX.Y.Z or vX.Y.Z-suffix"
+            exit 1
+          fi
+          case $version in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  release:
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist/
+
+      - name: Source tarball
+        # The VERSION file lets `make install` from the tarball know its version
+        run: |
+          git archive --format=tar.gz --prefix="acsle-$VERSION/" \
+            --add-virtual-file="acsle-$VERSION/ttylog_src/VERSION:$VERSION" \
+            -o "dist/acsle-$VERSION.tar.gz" HEAD
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Create GitHub Release
+        run: |
+          flags=""
+          [ "${{ needs.version.outputs.prerelease }}" = true ] && flags="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "ACSLE $VERSION" --generate-notes --verify-tag $flags
+
+  publish-repo:
+    needs: [version, release]
+    if: needs.version.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push to the gh-pages branch
+    env:
+      ACSLE_GPG_PRIVATE_KEY: ${{ secrets.ACSLE_GPG_PRIVATE_KEY }}
+      ACSLE_GPG_PASSPHRASE: ${{ secrets.ACSLE_GPG_PASSPHRASE }}
+    steps:
+      - name: Check for the signing key
+        id: key
+        run: |
+          if [ -z "$ACSLE_GPG_PRIVATE_KEY" ]; then
+            echo "::warning::ACSLE_GPG_PRIVATE_KEY is not set; skipping the apt/dnf repo. See ttylog_src/packaging/RELEASING.md"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: packages
+          path: dist/
+
+      - name: Install repo tools
+        if: steps.key.outputs.present == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq apt-utils createrepo-c rpm gnupg
+
+      - name: Import signing key
+        if: steps.key.outputs.present == 'true'
+        run: |
+          printf '%s\n' "$ACSLE_GPG_PRIVATE_KEY" | gpg --batch --import
+          fpr=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
+          echo "ACSLE_GPG_KEY_ID=$fpr" >> "$GITHUB_ENV"
+
+      - name: Check out gh-pages
+        if: steps.key.outputs.present == 'true'
+        run: |
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null; then
+            git fetch origin gh-pages
+            git worktree add pages origin/gh-pages
+            git -C pages switch -C gh-pages
+          else
+            git worktree add --orphan -b gh-pages pages
+          fi
+
+      - name: Update the apt and dnf repos
+        if: steps.key.outputs.present == 'true'
+        run: |
+          owner=$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          repo=${GITHUB_REPOSITORY#*/}
+          sh ttylog_src/packaging/publish-repo.sh pages dist "https://$owner.github.io/$repo"
+
+      - name: Push gh-pages
+        if: steps.key.outputs.present == 'true'
+        working-directory: pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Publish acsle-ttylog ${{ needs.version.outputs.version }}"
+          git push origin gh-pages

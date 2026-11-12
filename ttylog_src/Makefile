@@ -5,7 +5,9 @@
 #   make install DESTDIR=/tmp/stage   # for image builds / packaging
 #   make check                        # syntax-check every script
 
-VERSION ?= 0.1.0
+# From the VERSION file in release tarballs, else the latest vX.Y.Z git tag.
+# CI passes VERSION= explicitly for releases.
+VERSION ?= $(or $(shell cat VERSION 2>/dev/null),$(shell git describe --tags --match 'v[0-9]*' 2>/dev/null | sed 's/^v//'),0.0.0)
 PREFIX  ?= /usr
 LIBDIR  ?= $(PREFIX)/lib/acsle
 BINDIR  ?= $(PREFIX)/bin
@@ -22,7 +24,8 @@ install:
 	install -d $(DESTDIR)$(LIBDIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(CONFDIR)
 	for f in $(LIB_EXEC); do install -m 755 $$f $(DESTDIR)$(LIBDIR)/; done
 	for f in $(LIB_DATA); do install -m 644 $$f $(DESTDIR)$(LIBDIR)/; done
-	install -m 755 acsle $(DESTDIR)$(BINDIR)/acsle
+	sed "s|@ACSLE_VERSION@|$(VERSION)|" acsle > $(DESTDIR)$(BINDIR)/acsle
+	chmod 755 $(DESTDIR)$(BINDIR)/acsle
 	install -m 755 acsle-record $(DESTDIR)$(BINDIR)/acsle-record
 	@# Keep an existing config; write the new defaults alongside it
 	if [ -e $(DESTDIR)$(CONFDIR)/acsle.conf ]; then \
@@ -48,6 +51,9 @@ check:
 
 # Needs nfpm (https://nfpm.goreleaser.com). Output goes to dist/
 packages:
-	rm -rf build && $(MAKE) install DESTDIR=$(CURDIR)/build
+	rm -rf build dist && $(MAKE) install DESTDIR=$(CURDIR)/build
 	mkdir -p dist
-	for p in deb rpm apk archlinux; do VERSION=$(VERSION) nfpm package -f packaging/nfpm.yaml -p $$p -t dist/; done
+	for p in deb rpm apk archlinux; do \
+		arch=all; [ $$p = apk ] && arch=noarch; \
+		VERSION=$(VERSION) ARCH=$$arch nfpm package -f packaging/nfpm.yaml -p $$p -t dist/ || exit 1; \
+	done

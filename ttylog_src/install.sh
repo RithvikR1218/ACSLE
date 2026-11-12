@@ -26,6 +26,19 @@ DROPIN=$DROPIN_DIR/50-acsle.conf
 BLOCK_BEGIN="# BEGIN acsle"
 BLOCK_END="# END acsle"
 
+# openSUSE Tumbleweed ships only the vendor config in /usr/etc. It includes
+# /etc/ssh/sshd_config.d/*.conf, so the drop-in works; the vendor file itself
+# is never edited (a package update would overwrite it anyway).
+# Called again after installing the dependencies, since openssh may be new.
+VENDOR_CONFIG=0
+find_sshd_config() {
+    if [ ! -f "$SSHD_CONFIG" ] && [ -f /usr/etc/ssh/sshd_config ]; then
+        SSHD_CONFIG=/usr/etc/ssh/sshd_config
+        VENDOR_CONFIG=1
+    fi
+}
+find_sshd_config
+
 SRC_DIR=$(cd "$(dirname "$0")" && pwd)
 
 usage() {
@@ -116,6 +129,7 @@ sshd_test() {
 # Remove our drop-in, our marked block, and ForceCommand lines from the old manual install
 remove_sshd_config() {
     rm -f "$DROPIN"
+    [ "$VENDOR_CONFIG" -eq 1 ] && return 0
     sed -i \
         -e "/^$BLOCK_BEGIN\$/,/^$BLOCK_END\$/d" \
         -e '/^[[:space:]]*ForceCommand[[:space:]].*\/usr\/local\/src\/ttylog\/script\.sh/d' \
@@ -138,7 +152,11 @@ configure_sshd() {
     [ -f "$SSHD_CONFIG" ] || die "$SSHD_CONFIG not found; install openssh-server"
     [ -x "$LIBDIR/script.sh" ] || die "$LIBDIR/script.sh is missing or not executable"
 
-    cp -p "$SSHD_CONFIG" "$SSHD_CONFIG.acsle.bak"
+    if [ "$VENDOR_CONFIG" -eq 0 ]; then
+        cp -p "$SSHD_CONFIG" "$SSHD_CONFIG.acsle.bak"
+    elif ! has_dropin_include; then
+        die "$SSHD_CONFIG does not include $DROPIN_DIR/*.conf; add ForceCommand by hand"
+    fi
     remove_sshd_config
 
     if has_dropin_include; then
@@ -162,20 +180,24 @@ configure_sshd() {
     fi
 
     if ! sshd_test; then
-        cp -p "$SSHD_CONFIG.acsle.bak" "$SSHD_CONFIG"
+        [ "$VENDOR_CONFIG" -eq 0 ] && cp -p "$SSHD_CONFIG.acsle.bak" "$SSHD_CONFIG"
         rm -f "$DROPIN"
         die "sshd rejected the new config; restored $SSHD_CONFIG"
     fi
-    log "ForceCommand set in $where (backup: $SSHD_CONFIG.acsle.bak)"
+    if [ "$VENDOR_CONFIG" -eq 0 ]; then
+        log "ForceCommand set in $where (backup: $SSHD_CONFIG.acsle.bak)"
+    else
+        log "ForceCommand set in $where"
+    fi
 }
 
 # Returns 1 if there was nothing to remove, so the caller can skip the restart
 unconfigure_sshd() {
     has_sshd_config || return 1
-    cp -p "$SSHD_CONFIG" "$SSHD_CONFIG.acsle.bak"
+    [ "$VENDOR_CONFIG" -eq 0 ] && cp -p "$SSHD_CONFIG" "$SSHD_CONFIG.acsle.bak"
     remove_sshd_config
     if ! sshd_test; then
-        cp -p "$SSHD_CONFIG.acsle.bak" "$SSHD_CONFIG"
+        [ "$VENDOR_CONFIG" -eq 0 ] && cp -p "$SSHD_CONFIG.acsle.bak" "$SSHD_CONFIG"
         die "sshd rejected the config after removing ACSLE; restored $SSHD_CONFIG"
     fi
     log "removed ACSLE ForceCommand from the sshd config"
@@ -222,6 +244,7 @@ fi
 
 if [ "$DO_DEPS" -eq 1 ]; then
     install_deps
+    find_sshd_config
 fi
 
 if [ "$DO_FILES" -eq 1 ]; then

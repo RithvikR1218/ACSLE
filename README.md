@@ -28,6 +28,70 @@ Every distro here has been tested in containers.
 
 ## Install
 
+Pick one. All three install the same files and set the same `ForceCommand`.
+
+| Method | Use when |
+|---|---|
+| [Package repo](#from-the-package-repo-recommended) | Debian/Ubuntu, RHEL/Rocky/Fedora, openSUSE. Updates come with `apt upgrade` / `dnf upgrade` |
+| [Release download](#from-a-release) | Alpine or Arch, offline machines, or to pin a version |
+| [Git clone](#from-git) | Development, or the latest unreleased code |
+
+**Keep your current SSH session open** until a new login works. `ForceCommand`
+applies to every SSH login, including yours.
+
+### From the package repo (recommended)
+
+The repo is signed with the ACSLE packages key.
+
+```sh
+# Debian / Ubuntu
+sudo install -d /etc/apt/keyrings
+curl -fsSL https://steelisi.github.io/ACSLE/acsle.gpg | sudo tee /etc/apt/keyrings/acsle.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/acsle.gpg] https://steelisi.github.io/ACSLE/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/acsle.list
+sudo apt update && sudo apt install acsle-ttylog
+
+# RHEL / Rocky / Alma / Fedora
+sudo curl -fsSLo /etc/yum.repos.d/acsle.repo https://steelisi.github.io/ACSLE/rpm/acsle.repo
+sudo dnf install acsle-ttylog
+
+# openSUSE
+sudo zypper addrepo https://steelisi.github.io/ACSLE/rpm/acsle.repo
+sudo zypper install acsle-ttylog
+```
+
+The package pulls in its dependencies, sets `ForceCommand` and restarts sshd.
+Removing it takes the `ForceCommand` out again; upgrading leaves it in place.
+
+**Testbeds where sshd must not change** (the package version of `install.sh --no-sshd`):
+
+```sh
+sudo ACSLE_NO_SSHD=1 apt install acsle-ttylog            # or dnf / zypper / pacman
+# or, before installing (the only way that works on Alpine):
+sudo mkdir -p /etc/acsle && sudo touch /etc/acsle/no-sshd
+```
+
+Then record sessions with `acsle-record` (see [below](#without-changing-the-sshd-config-remote-testbeds)).
+
+### From a release
+
+Every [release](https://github.com/STEELISI/ACSLE/releases) has a `.deb`,
+`.rpm`, `.apk` and Arch package, a source tarball and `SHA256SUMS`:
+
+```sh
+V=1.0.0   # the version you want
+curl -fsSLO https://github.com/STEELISI/ACSLE/releases/download/v$V/acsle-ttylog_${V}_all.deb
+sudo apt install ./acsle-ttylog_${V}_all.deb
+# RHEL/Fedora/openSUSE: acsle-ttylog-$V-1.noarch.rpm   (sudo dnf install ./...)
+# Alpine:               acsle-ttylog_${V}_noarch.apk   (sudo apk add --allow-untrusted ./...)
+# Arch:                 acsle-ttylog-$V-1-any.pkg.tar.zst   (sudo pacman -U ./...)
+```
+
+The source tarball `acsle-$V.tar.gz` works like a git clone: extract it and run
+`sudo acsle-$V/ttylog_src/install.sh`.
+
+### From git
+
 ```sh
 git clone https://github.com/STEELISI/ACSLE.git
 sudo ACSLE/ttylog_src/install.sh
@@ -40,9 +104,6 @@ sudo ACSLE/ttylog_src/install.sh
 4. Restarts sshd.
 
 It is safe to run again, for example after a `git pull`, to upgrade.
-
-**Keep your current SSH session open** until a new login works. `ForceCommand`
-applies to every SSH login, including yours.
 
 | Option | Use |
 |---|---|
@@ -99,9 +160,9 @@ runcmd:
 
 With Packer, Ansible or similar, run the same `install.sh --no-restart` as a shell step.
 
-### As a package (.deb / .rpm / .apk / Arch)
+### Building the packages yourself
 
-You can also build native packages with [nfpm](https://nfpm.goreleaser.com):
+The packages are built with [nfpm](https://nfpm.goreleaser.com) 2.48 or newer:
 
 ```sh
 cd ACSLE/ttylog_src
@@ -109,8 +170,7 @@ make packages VERSION=1.0.0      # writes dist/*.deb, *.rpm, *.apk, *.pkg.tar.zs
 sudo apt install ./dist/acsle-ttylog_1.0.0_all.deb     # or dnf / apk / pacman
 ```
 
-The package declares the dependencies, sets `ForceCommand` on install, and
-removes it on uninstall (but not on upgrade).
+To cut a release, see [packaging/RELEASING.md](ttylog_src/packaging/RELEASING.md).
 
 ## What goes where
 
@@ -149,6 +209,10 @@ See **[COMMANDS.md](COMMANDS.md)** for every option, examples, recipes and commo
 ## Uninstall
 
 ```sh
+# Installed from a package
+sudo apt remove acsle-ttylog        # or dnf / zypper / apk del / pacman -R
+
+# Installed with install.sh
 sudo ACSLE/ttylog_src/install.sh --uninstall           # keeps logs and /etc/acsle
 sudo ACSLE/ttylog_src/install.sh --uninstall --purge   # deletes them too
 ```

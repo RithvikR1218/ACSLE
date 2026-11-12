@@ -18,6 +18,9 @@ import re
 import signal
 import sys
 
+# Replaced by `make install`; '@'-prefixed means running from a source checkout
+VERSION = '@ACSLE_VERSION@'
+
 CONF_PATH = os.environ.get('ACSLE_CONF', '/etc/acsle/acsle.conf')
 DEFAULTS = {
     'TRACE_DIR': '/var/log/ttylog',
@@ -310,6 +313,8 @@ def main():
             p.add_argument('-s', '--session', type=int, help='only this session number')
 
     parser = argparse.ArgumentParser(prog='acsle', description='Browse sessions recorded by ttylog.')
+    parser.add_argument('-V', '--version', action='version',
+                        version='acsle ' + ('dev' if VERSION.startswith('@') else VERSION))
     sub = parser.add_subparsers(dest='command', metavar='COMMAND')
     sub.required = True
 
