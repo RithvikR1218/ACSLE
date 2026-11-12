@@ -40,12 +40,13 @@ Use RSA 4096, because RHEL 8's rpm can't verify ed25519.
 
 ```sh
 export GNUPGHOME=$(mktemp -d)       # keep it out of your own keyring
-gpg --batch --passphrase '' --quick-gen-key "ACSLE Packages <sunshine@isi.edu>" rsa4096 sign 5y
+gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key "ACSLE Packages <sunshine@isi.edu>" rsa4096 sign 5y
 gpg --armor --export-secret-keys "ACSLE Packages" > acsle-signing-key.asc
 gpg --armor --export "ACSLE Packages"             > acsle-public-key.asc
 ```
 
-To protect the key with a passphrase, leave out `--passphrase ''`, and add the
+To protect the key with a passphrase, leave out `--batch --pinentry-mode loopback --passphrase ''`
+so gpg asks for one, and add the
 passphrase as the `ACSLE_GPG_PASSPHRASE` secret.
 
 Store `acsle-signing-key.asc` somewhere safe outside GitHub, such as the lab's
